@@ -1,7 +1,8 @@
-package ma.emsi.lahlou.tp1lahlou.jsf; // A modifier...
+package ma.emsi.lahlou.tp1lahlou.jsf;
 
 
-import ma.emsi.lahlou.tp1lahlou.service.GenerateurReponse;
+import ma.emsi.lahlou.tp1lahlou.llm.JsonAdapterPourGemini;
+import ma.emsi.lahlou.tp1lahlou.llm.LlmInteraction;
 import jakarta.faces.application.FacesMessage;
 import jakarta.faces.context.FacesContext;
 import jakarta.faces.model.SelectItem;
@@ -11,6 +12,7 @@ import jakarta.inject.Named;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -44,19 +46,22 @@ public class Bb implements Serializable {
      */
     private String question;
     /**
-     * Dernière réponse de l'API OpenAI.
+     * Dernière réponse de Gemini.
      */
     private String reponse;
+    private String texteRequeteJson;
+    private String texteReponseJson;
+    private boolean debug;
     /**
      * La conversation depuis le début.
      */
     private StringBuilder conversation = new StringBuilder();
 
     /**
-     * Service pour modifier la question et générer la réponse.
+     * Adaptateur pour préparer les requêtes et extraire les réponses de Gemini.
      */
     @Inject
-    private GenerateurReponse generateurReponse;
+    private JsonAdapterPourGemini jsonAdapter;
 
     /**
      * Contexte JSF. Utilisé pour qu'un message d'erreur s'affiche dans le formulaire.
@@ -103,6 +108,30 @@ public class Bb implements Serializable {
         this.reponse = reponse;
     }
 
+    public String getTexteRequeteJson() {
+        return texteRequeteJson;
+    }
+
+    public void setTexteRequeteJson(String texteRequeteJson) {
+        this.texteRequeteJson = texteRequeteJson;
+    }
+
+    public String getTexteReponseJson() {
+        return texteReponseJson;
+    }
+
+    public void setTexteReponseJson(String texteReponseJson) {
+        this.texteReponseJson = texteReponseJson;
+    }
+
+    public boolean isDebug() {
+        return debug;
+    }
+
+    public void setDebug(boolean debug) {
+        this.debug = debug;
+    }
+
     public String getConversation() {
         return conversation.toString();
     }
@@ -113,8 +142,7 @@ public class Bb implements Serializable {
 
     /**
      * Envoie la question au serveur.
-     * Exercice pour le bonus : le service produit une fiche de lecture du texte.
-     * Le rôle choisi est rappelé dans la première fiche ; aucun LLM n'est appelé.
+     * Le texte est envoyé à Gemini avec l'historique de la conversation.
      *
      * @return null pour rester sur la même page.
      */
@@ -131,8 +159,21 @@ public class Bb implements Serializable {
         if (this.conversation.isEmpty()) { // Si la conversation n'a pas encore commencé
             // Fige la liste déroulante qui permet de choisir le rôle système
             this.roleSystemeChangeable = false;
+            this.jsonAdapter.setSystemRole(this.roleSysteme);
         }
-        this.reponse = this.generateurReponse.genererReponse(this.question, this.roleSysteme);
+        try {
+            LlmInteraction interaction = jsonAdapter.envoyerRequete(question);
+            this.reponse = interaction.reponseExtraite();
+            this.texteRequeteJson = interaction.questionJson();
+            this.texteReponseJson = interaction.reponseJson();
+        } catch (Exception e) {
+            this.reponse = "Erreur : " + e.getMessage();
+            FacesMessage message = new FacesMessage(FacesMessage.SEVERITY_ERROR,
+                    "Problème de connexion avec l'API du LLM",
+                    "Problème de connexion avec l'API du LLM" + e.getMessage()
+                            + "\n" + Arrays.toString(e.getStackTrace()));
+            facesContext.addMessage(null, message);
+        }
         
         // La conversation contient l'historique des questions-réponses depuis le début.
         afficherConversation();
@@ -185,6 +226,15 @@ public class Bb implements Serializable {
                     et le prix moyen d’un repas.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Guide touristique"));
+
+            role = """
+                    Tu es un dépanneur Wi-Fi qui aide une personne à la maison.
+                    Réponds en français simple, sans jargon, et en moins de 100 mots.
+                    Propose une seule vérification concrète par réponse, puis pose une question
+                    pour connaître son résultat. Tiens compte des vérifications déjà faites.
+                    Ne demande jamais de mot de passe et ne propose pas de désactiver la sécurité.
+                    """;
+            this.listeRolesSysteme.add(new SelectItem(role, "Dépanneur Wi-Fi à la maison"));
         }
 
         return this.listeRolesSysteme;
